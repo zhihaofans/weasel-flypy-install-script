@@ -50,13 +50,25 @@ param(
 # ===========================================================================
 # 配置区：版本锁定（改这里即可升级）
 # ===========================================================================
+# 【与国内镜像版同步更新说明】
+#   本文件与 install-rime-cn.ps1 除「下载源」外完全一致。
+#   上游发新版时，只需改这里的 *Version 与 *Sha256（两个文件都要改）：
+#     - *Version  : 改成新的 release tag
+#     - *Sha256   : 从 release 页或 GitHub API 的 digest 字段取
+# ---------------------------------------------------------------------------
+# 每个包可配多个下载源，脚本按顺序尝试，任一成功即用；全部失败才报错。
+# 主源在前的为优先源。镜像与官方源的文件字节一致，故共用同一 SHA256。
 $WeaselVersion = '0.17.4'
-$WeaselUrl     = "https://github.com/rime/weasel/releases/download/$WeaselVersion/weasel-$WeaselVersion.0-installer.exe"
 $WeaselSha256  = 'cf509534a8f5f8af9c98ed7cbb8f135439f145a8cbe7e50ede42bb5b5ab45c29'
+$WeaselUrls    = @(
+    "https://github.com/rime/weasel/releases/download/$WeaselVersion/weasel-$WeaselVersion.0-installer.exe"
+)
 
 $IceVersion    = '2026.06.30'
-$IceUrl        = "https://github.com/iDvel/rime-ice/releases/download/$IceVersion/full.zip"
 $IceSha256     = '675d23b070be00e1b800f9a6db033ef98f4493cd5b568ed8aa3b3541769c46ac'
+$IceUrls       = @(
+    "https://github.com/iDvel/rime-ice/releases/download/$IceVersion/full.zip"
+)
 
 # 首选方案：小鹤双拼
 $PrimarySchema = 'double_pinyin_flypy'
@@ -108,12 +120,28 @@ function Get-Sha256($path) {
     (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLower()
 }
 
-function Save-File($url, $dest) {
-    Write-Info "下载: $url"
+function Save-File($urls, $dest) {
+    # 依次尝试多个源，任一成功即返回；全部失败才抛错
     $old = $ProgressPreference
     $ProgressPreference = 'SilentlyContinue'   # 用 IWR 下载大文件时进度条极慢
     try {
-        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -TimeoutSec 1800
+        $lastErr = $null
+        for ($i = 0; $i -lt $urls.Count; $i++) {
+            $url = $urls[$i]
+            $tag = if ($urls.Count -gt 1) { " [$($i + 1)/$($urls.Count)]" } else { '' }
+            Write-Info "下载$tag`: $url"
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing -TimeoutSec 1800
+                return
+            }
+            catch {
+                $lastErr = $_
+                if ($i -lt $urls.Count - 1) {
+                    Write-Warn2 "此源失败，尝试下一个：$($_.Exception.Message)"
+                }
+            }
+        }
+        throw "所有下载源均失败。最后一个错误：$($lastErr.Exception.Message)"
     }
     finally {
         $ProgressPreference = $old
@@ -189,7 +217,7 @@ if (-not $SkipInstall) {
     Write-Step "第 1 步 / 3：安装小狼毫 Weasel $WeaselVersion"
 
     $exe = Join-Path $work 'weasel-installer.exe'
-    Save-File $WeaselUrl $exe
+    Save-File $WeaselUrls $exe
 
     Write-Info '校验 SHA256 ...'
     $got = Get-Sha256 $exe
@@ -240,7 +268,7 @@ if ($toBackup.Count -gt 0) {
 
 # 2.2 下载方案包
 $zip = Join-Path $work 'rime-ice.zip'
-Save-File $IceUrl $zip
+Save-File $IceUrls $zip
 Write-Info '校验 SHA256 ...'
 $got = Get-Sha256 $zip
 if ($got -ne $IceSha256) {
