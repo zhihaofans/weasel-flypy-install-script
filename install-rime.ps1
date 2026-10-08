@@ -259,9 +259,25 @@ foreach ($d in @('userdb', 'sync')) {
 if ($toBackup.Count -gt 0) {
     New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
     foreach ($t in $toBackup) {
-        Copy-Item -Path $t.FullName -Destination $backupDir -Recurse -Force
+        try {
+            Copy-Item -Path $t.FullName -Destination $backupDir -Recurse -Force -ErrorAction Stop
+        }
+        catch {
+            # userdb 可能被运行中的输入法占用，跳过而不中断
+            Write-Warn2 "跳过（可能被占用）: $($t.Name) - $($_.Exception.Message)"
+        }
     }
     Write-Ok "已备份 $($toBackup.Count) 项既有配置 -> $backupDir"
+
+    # 只保留最近 3 份备份，避免重复运行时无限累积
+    $oldBackups = Get-ChildItem -Path $RimeDir -Directory -Filter '_backup_*' -ErrorAction SilentlyContinue |
+                  Sort-Object Name -Descending | Select-Object -Skip 3
+    if ($oldBackups) {
+        foreach ($ob in $oldBackups) {
+            Remove-Item -Path $ob.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-Info "已清理 $($oldBackups.Count) 份过期备份（保留最近 3 份）。"
+    }
 } else {
     Write-Info '无既有自定义配置，全新部署。'
 }
