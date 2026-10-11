@@ -1,29 +1,76 @@
 # Rime 小狼毫 + 雾凇拼音 一键安装
 
-一个 PowerShell 脚本，在新 Windows 10/11 电脑上装好 Rime 小狼毫输入法、部署雾凇拼音方案、并切换到小鹤双拼。
+一条命令在新 Windows 10/11 电脑上装好 Rime 小狼毫输入法、部署雾凇拼音方案、并切换到小鹤双拼。
 
-## 两个版本
+## 在线一键安装（推荐）
 
-| 文件 | 下载源 | 适用 |
-|---|---|---|
-| `install-rime-cn.ps1` | 国内镜像优先，失败自动回退 GitHub | **国内网络推荐** |
-| `install-rime.ps1` | GitHub 官方 | 海外网络 / 镜像异常时 |
-
-两版**除下载源外完全一致**，都带 SHA256 校验。镜像与官方文件字节相同，共用同一 hash——校验和既能防损坏，也能证明镜像未被篡改。
-
-## 使用
-
-把对应脚本拷到新电脑，然后任选一种方式（以 CN 版为例）：
+打开 PowerShell（**不用管理员**，脚本会自己提权），粘贴一行命令回车：
 
 ```powershell
-# 方式 A：右键 install-rime-cn.ps1 -> "使用 PowerShell 运行"
-# 方式 B：命令行
+irm https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/install.ps1 | iex
+```
+
+> 国内网络如遇 raw.githubusercontent 慢或不通，用这个等价地址：
+>
+> ```powershell
+> irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
+> ```
+
+引导器会自动挑一个能通的源把主脚本下下来，然后启动安装。约 3-5 分钟。装完任务栏出现『小狼毫』图标，**默认就是小鹤双拼**。
+
+想装 GitHub 官方源版（不用国内镜像）：
+
+```powershell
+& ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1))) -Source github
+```
+
+### 在线方式为什么不是直接 `irm .../install-rime-cn.ps1 | iex`
+
+| 原因 | 说明 |
+|---|---|
+| `exit` 会关窗口 | 主脚本有 6 处 `exit`。`iex` 内联执行时 `exit` 会直接关掉你正在用的 PowerShell 窗口，**出错连提示都看不到** |
+| 自提权会失效 | 主脚本提权依赖 `$PSCommandPath`，而 `iex` 下它是空的，脚本会直接报错退出 |
+| 看不完输出 | 安装要几分钟，内联执行结束时窗口就没了 |
+
+所以 `install.ps1` 是个**引导器**：下载 → 存成临时文件 → 用 `-File` 启动独立子进程。这样子进程的 `exit` 只结束它自己，你的窗口留着，报错和结果都能看完。
+
+引导时想加参数（透传给主脚本）：
+
+```powershell
+# 只更新方案，不重装输入法
+& ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1))) -SkipInstall
+
+# 自定义候选词个数
+& ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1))) -PageSize 7
+```
+
+### 安全检查（可选）
+
+不放心直接跑远程脚本的话，先下来看一眼再执行：
+
+```powershell
+# 存到本地查看
+irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 -OutFile .\install.ps1
+notepad .\install.ps1
+```
+
+## 本地方式（不用在线）
+
+把仓库克隆或下载下来，运行：
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\install-rime-cn.ps1
 ```
 
-脚本会自动请求管理员权限（装输入法必需），全程无需干预。约 3-5 分钟（取决于网速）。
+## 文件说明
 
-装完任务栏出现『小狼毫』图标，**默认就是小鹤双拼**。
+| 文件 | 作用 |
+|---|---|
+| `install.ps1` | **在线引导器**（上面那一行命令跑的就是它） |
+| `install-rime-cn.ps1` | 主安装脚本 · 国内镜像优先，失败自动回退 GitHub（**国内推荐**） |
+| `install-rime.ps1` | 主安装脚本 · GitHub 官方源 |
+
+两个主脚本**除下载源外完全一致**，都带 SHA256 校验。镜像与官方文件字节相同，共用同一 hash——校验和既能防损坏，也能证明镜像未被篡改。
 
 ## 零前置依赖
 
@@ -55,10 +102,14 @@ powershell -ExecutionPolicy Bypass -File .\install-rime-cn.ps1
 
 ## 脚本做了什么
 
+引导器（`install.ps1`）：下载主脚本（3 源轮询）→ 落盘 → `-File` 启动子进程 → 清理临时文件。
+
+主脚本：
+
 1. 检查系统、TLS 1.2、管理员权限（不足则自动提权重启）
 2. 下载小狼毫安装器 → 校验 SHA256 → `/S` 静默安装
 3. 下载雾凇拼音 `full.zip` → 校验 SHA256 → 解压
-4. **备份**你已有的 `*.custom.yaml`、`userdb/`、`sync/`
+4. **备份**你已有的 `*.custom.yaml`、`userdb/`、`sync/`（只保留最近 3 份）
 5. 部署方案到 `%APPDATA%\Rime`（跳过 `build/`、`.git` 等）
 6. 写 `default.custom.yaml`：方案列表 = **小鹤双拼 + 全拼**，候选词 9 个
 7. 写 `double_pinyin_flypy.custom.yaml`（已存在则不覆盖）
@@ -69,7 +120,7 @@ powershell -ExecutionPolicy Bypass -File .\install-rime-cn.ps1
 
 ## 参数
 
-两版参数完全相同（示例用 CN 版，换 `install-rime.ps1` 亦可）：
+主脚本参数（本地方式直接用；在线方式通过引导器透传）：
 
 ```powershell
 # 只更新方案，不重装输入法
@@ -83,6 +134,13 @@ powershell -ExecutionPolicy Bypass -File .\install-rime-cn.ps1 -RimeDir "D:\Rime
 
 # 保留临时文件（排查问题用）
 powershell -ExecutionPolicy Bypass -File .\install-rime-cn.ps1 -KeepDownload
+```
+
+引导器独有参数：
+
+```powershell
+# 换成 GitHub 官方源版
+.\install.ps1 -Source github
 ```
 
 ## 装完怎么用
@@ -119,3 +177,12 @@ curl -s https://api.github.com/repos/iDvel/rime-ice/releases/latest | grep diges
 - 若装完任务栏没图标：注销/重启一次，或运行 `WeaselSetup.exe` 注册输入法。
 - 装了第三方杀软可能拦截静默安装，届时手动确认一次。
 - 本脚本不处理卸载（按需求）。要卸载：设置 → 应用 → 找到 Rime 卸载；配置目录 `%APPDATA%\Rime` 手动删。
+- **在线运行的安全性**：`irm | iex` 是"下载即执行"，本质是信任仓库作者。本仓库全部脚本开源、单文件、零依赖，可先 `-OutFile` 下来审阅再跑（见上文「安全检查」）。引导器只从本仓库拉取主脚本，不执行任何其他远程代码。
+
+## 引导器维护说明
+
+引导器里的 3 个下载源都指向本仓库 `master` 分支，**主脚本更新后不用改引导器**，推送即生效。
+
+新增下载源（比如再加一个代理）时，改 `install.ps1` 里的 `$baseUrls` 数组即可。注意保持顺序：**国内可达性好的放前面**（jsDelivr > raw.githubusercontent > 代理），脚本会按顺序试到通为止。
+
+引导器自检：`python3 tests/bootstrap-check.py`（会联网验证 3 个地址是否真的 200）。
