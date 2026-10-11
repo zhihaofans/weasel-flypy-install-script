@@ -7,16 +7,18 @@
 打开 PowerShell（**不用管理员**，脚本会自己提权），粘贴一行命令回车：
 
 ```powershell
+irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
+```
+
+`cdn.jsdelivr.net` 是 GitHub 的 CDN 镜像，国内外都通。想用官方源地址（国内可能不通）：
+
+```powershell
 irm https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/install.ps1 | iex
 ```
 
-> 国内网络如遇 raw.githubusercontent 慢或不通，用这个等价地址：
->
-> ```powershell
-> irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
-> ```
-
 引导器会自动挑一个能通的源把主脚本下下来，然后启动安装。约 3-5 分钟。装完任务栏出现『小狼毫』图标，**默认就是小鹤双拼**。
+
+> **引导器的提示是英文的**——这是刻意的：`irm | iex` 路径下 PowerShell 5.1 会按 GBK 解码响应，任何中文（哪怕在注释里）都会变成乱码。真正的安装过程和结果都是完整中文（主脚本走 `-File` 路径，有 BOM 保护）。详见下文[编码铁律](#-编码铁律两个文件要求完全相反本项目最大的坑)。
 
 想装 GitHub 官方源版（不用国内镜像）：
 
@@ -187,13 +189,27 @@ curl -s https://api.github.com/repos/iDvel/rime-ice/releases/latest | grep diges
 
 引导器的自检：`python3 tests/bootstrap-check.py`（会联网验证 3 个地址是否真的 200）。
 
-### ⚠️ 脚本必须保存为「UTF-8 with BOM」
+### ⚠️ 编码铁律：两个文件要求完全相反（本项目最大的坑）
 
-Windows PowerShell 5.1 对**无 BOM 的 `.ps1`** 会按系统 ANSI 解码（中文系统 = GBK）。脚本里全是中文，结果会是：
+Windows PowerShell 5.1 对编码的处理有个老毛病，而本项目**同时踩在两条不同的执行路径上**，两条路的编码要求是**相反的**：
 
-- 控制台中文变乱码：`正在下载` → `姝ｅ湪涓嬭浇`
-- 更糟：UTF-8 字节被按 GBK 误读后可能**破坏引号边界**，直接引发语法错误、脚本启动即失败
+| 文件 | 执行路径 | 编码要求 | 原因 |
+|---|---|---|---|
+| `install.ps1`（引导器） | `irm ... \| iex` | **纯 ASCII + 无 BOM** | `irm` 对无 charset 的响应按系统 ANSI(GBK) 解码。任何非 ASCII 字符（**包括注释里的中文**）都会乱码；**带 BOM 更致命**——BOM 三字节会被 GBK 拼成一个非法字符 `锘`，卡在脚本第一行行首，PowerShell 直接抛 `ParseError`，脚本一行都执行不了 |
+| `install-rime*.ps1`（主脚本） | 引导器 `-OutFile` 落盘 → `-File` 执行 | **UTF-8 with BOM** | 走真实文件路径时 PS5.1 按 BOM 判定编码。**无 BOM 就按 GBK 解码**，中文全乱码（`正在下载` → `姝ｅ湪涓嬭浇`），且 UTF-8 字节被误读后可能破坏引号边界、引发语法错误 |
 
-所以本仓库所有 `.ps1` 都是 **UTF-8 with BOM**（`EF BB BF` 开头），`install.ps1` 还会在下载后**检测并补写 BOM**（CDN/代理可能吞掉它）。
+**为什么这么绕？** 因为这两条路各自"应该有的编码"正好是对方"绝对不能有的编码"：
 
-自己编辑时注意：VS Code 右下角选 `UTF-8 with BOM`；记事本另存为时编码选 `带 BOM 的 UTF-8`。
+```
+irm | iex  这条路：文件在内存里是【字符串】，编码信息已经丢了 → 只能靠纯 ASCII 保平安
+-File      这条路：文件在磁盘上是【字节】，BOM 能告诉 PS 怎么解码 → 必须带 BOM
+```
+
+所以：
+- `install.ps1` 保持 **纯 ASCII、无 BOM**（连注释都是英文，就是怕中文乱码后产生 `` ` `` 或引号破坏语法）
+- 两个主脚本保持 **UTF-8 with BOM**
+- 引导器下载主脚本后会**检测并补写 BOM**（CDN/代理可能把 BOM 丢掉），这就是让主脚本中文正常的关键一步
+
+自己编辑时注意：
+- 改 `install.ps1` → **不要加任何中文**，存成 `UTF-8`（无 BOM）
+- 改主脚本 → 存成 `UTF-8 with BOM`（VS Code 右下角选 `UTF-8 with BOM`；记事本选 `带 BOM 的 UTF-8`）
