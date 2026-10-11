@@ -185,4 +185,15 @@ curl -s https://api.github.com/repos/iDvel/rime-ice/releases/latest | grep diges
 
 新增下载源（比如再加一个代理）时，改 `install.ps1` 里的 `$baseUrls` 数组即可。注意保持顺序：**国内可达性好的放前面**（jsDelivr > raw.githubusercontent > 代理），脚本会按顺序试到通为止。
 
-引导器自检：`python3 tests/bootstrap-check.py`（会联网验证 3 个地址是否真的 200）。
+引导器的自检：`python3 tests/bootstrap-check.py`（会联网验证 3 个地址是否真的 200）。
+
+### ⚠️ 脚本必须保存为「UTF-8 with BOM」
+
+Windows PowerShell 5.1 对**无 BOM 的 `.ps1`** 会按系统 ANSI 解码（中文系统 = GBK）。脚本里全是中文，结果会是：
+
+- 控制台中文变乱码：`正在下载` → `姝ｅ湪涓嬭浇`
+- 更糟：UTF-8 字节被按 GBK 误读后可能**破坏引号边界**，直接引发语法错误、脚本启动即失败
+
+所以本仓库所有 `.ps1` 都是 **UTF-8 with BOM**（`EF BB BF` 开头），`install.ps1` 还会在下载后**检测并补写 BOM**（CDN/代理可能吞掉它）。
+
+自己编辑时注意：VS Code 右下角选 `UTF-8 with BOM`；记事本另存为时编码选 `带 BOM 的 UTF-8`。

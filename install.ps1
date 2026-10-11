@@ -1,4 +1,4 @@
-# ===========================================================================
+﻿# ===========================================================================
 #  在线引导脚本（bootstrap）—— 让主安装脚本可以「一行命令在线运行」
 # ---------------------------------------------------------------------------
 #  为什么需要这个文件？
@@ -111,6 +111,36 @@ if ($size -lt 1024) {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     Read-Host '按回车键退出'
     exit 1
+}
+
+# ---------------------------------------------------------------------------
+# 2.1 关键：确保主脚本带 UTF-8 BOM
+#   Windows PowerShell 5.1 对「无 BOM 的 .ps1」会按系统 ANSI 解码（中文系统=GBK），
+#   导致中文全部乱码，且 UTF-8 字节被误读后可能破坏引号边界、引发语法错误。
+#   CDN/代理有时会吞掉 BOM，所以这里做一次兜底补齐。
+# ---------------------------------------------------------------------------
+$bytes = [System.IO.File]::ReadAllBytes($tmp)
+$hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+if (-not $hasBom) {
+    # 仅在内容确实是合法 UTF-8 时补 BOM，避免破坏非 UTF-8 文件
+    $isUtf8 = $true
+    try {
+        $null = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    } catch {
+        $isUtf8 = $false
+    }
+    if ($isUtf8) {
+        # 先分配目标 byte[]，再逐段拷贝，避免 Object[] 与 byte[] 的隐式转换问题
+        $out = New-Object byte[] ($bytes.Length + 3)
+        $out[0] = 0xEF; $out[1] = 0xBB; $out[2] = 0xBF
+        [Array]::Copy($bytes, 0, $out, 3, $bytes.Length)
+        [System.IO.File]::WriteAllBytes($tmp, $out)
+        Write-Line '已补写 UTF-8 BOM（防止中文乱码）' 'DarkGray'
+    } else {
+        Write-Line '警告：下载内容非 UTF-8，中文可能显示异常。' 'Yellow'
+    }
+} else {
+    Write-Line 'UTF-8 BOM 已存在，中文编码正常。' 'DarkGray'
 }
 Write-Line "已下载 $([math]::Round($size / 1024, 1)) KB" 'Green'
 
