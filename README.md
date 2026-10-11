@@ -7,18 +7,22 @@
 打开 PowerShell（**不用管理员**，脚本会自己提权），粘贴一行命令回车：
 
 ```powershell
-irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
-```
-
-`cdn.jsdelivr.net` 是 GitHub 的 CDN 镜像，国内外都通。想用官方源地址（国内可能不通）：
-
-```powershell
 irm https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/install.ps1 | iex
 ```
 
+`raw.githubusercontent.com` 是 GitHub 官方源，**即时更新、无缓存**，推荐优先使用。
+
+> **如果官方源连不上**（国内常见），改用 CDN 镜像：
+>
+> ```powershell
+> irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
+> ```
+>
+> ⚠️ jsDelivr 对 `@master` 有缓存（可能滞后几小时）。如果刚更新过仓库，CDN 上可能还是旧版，遇到奇怪报错时优先换官方源。
+
 引导器会自动挑一个能通的源把主脚本下下来，然后启动安装。约 3-5 分钟。装完任务栏出现『小狼毫』图标，**默认就是小鹤双拼**。
 
-> **引导器的提示是英文的**——这是刻意的：`irm | iex` 路径下 PowerShell 5.1 会按 GBK 解码响应，任何中文（哪怕在注释里）都会变成乱码。真正的安装过程和结果都是完整中文（主脚本走 `-File` 路径，有 BOM 保护）。详见下文[编码铁律](#-编码铁律两个文件要求完全相反本项目最大的坑)。
+> **引导器的提示是英文的**——这是刻意的：`irm | iex` 路径下 PowerShell 5.1 会按 GBK 解码响应，任何中文（哪怕在注释里）都会变成乱码，甚至会破坏脚本解析（报 `Unexpected attribute 'CmdletBinding'`）。真正的安装过程和结果都是完整中文（主脚本走 `-File` 路径，有 BOM 保护）。详见下文[编码铁律](#-编码铁律两个文件要求完全相反本项目最大的坑)。
 
 想装 GitHub 官方源版（不用国内镜像）：
 
@@ -185,7 +189,9 @@ curl -s https://api.github.com/repos/iDvel/rime-ice/releases/latest | grep diges
 
 引导器里的 3 个下载源都指向本仓库 `master` 分支，**主脚本更新后不用改引导器**，推送即生效。
 
-新增下载源（比如再加一个代理）时，改 `install.ps1` 里的 `$baseUrls` 数组即可。注意保持顺序：**国内可达性好的放前面**（jsDelivr > raw.githubusercontent > 代理），脚本会按顺序试到通为止。
+新增下载源（比如再加一个代理）时，改 `install.ps1` 里的 `$baseUrls` 数组即可。
+
+顺序规则：**官方源 `raw.githubusercontent` 必须排第一**，因为 jsDelivr 的 `@master` 有缓存、可能滞后数小时，而缓存里的旧版主脚本可能缺 BOM（导致中文乱码）。CDN 和代理作为回退放在后面。脚本会按顺序试，且**每个源下载后都会校验内容**（体积、特征串），不合格自动换下一个。
 
 引导器的自检：`python3 tests/bootstrap-check.py`（会联网验证 3 个地址是否真的 200）。
 

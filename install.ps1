@@ -72,10 +72,13 @@ if ([Environment]::OSVersion.Platform -ne 'Win32NT') {
 # ---------------------------------------------------------------------------
 $scriptName = if ($Source -eq 'cn') { 'install-rime-cn.ps1' } else { 'install-rime.ps1' }
 
-# raw.githubusercontent.com is often blocked in CN; jsDelivr CDN comes first.
+# raw.githubusercontent.com is the authoritative source and updates instantly.
+# jsDelivr is only a fallback: its @master cache can serve a STALE main script
+# for hours after a push, and a stale script may lack the UTF-8 BOM - which
+# would garble Chinese text under -File. So official first, CDN as backup.
 $baseUrls = @(
-    "https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/$scriptName",
     "https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName",
+    "https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/$scriptName",
     "https://ghproxy.net/https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName"
 )
 
@@ -95,19 +98,38 @@ for ($i = 0; $i -lt $baseUrls.Count; $i++) {
     Write-Line "Download [$($i + 1)/$($baseUrls.Count)]: $url" 'DarkGray'
     try {
         Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 300
-        $ok = $true
-        break
     } catch {
         $lastErr = $_
         Write-Line "This mirror failed, trying next: $($_.Exception.Message)" 'Yellow'
+        continue
     }
+
+    # Validate what we got before accepting it. A stale CDN copy or an error
+    # page would otherwise be passed straight to -File and fail confusingly.
+    $sb = [System.IO.File]::ReadAllBytes($tmp)
+    if ($sb.Length -lt 1024) {
+        Write-Line "Rejected: only $($sb.Length) bytes (looks like an error page)." 'Yellow'
+        $lastErr = [Exception]::new("content too small")
+        continue
+    }
+    # A genuine main script is UTF-8 (may or may not carry a BOM here, we fix
+    # that below) and contains the ASCII markers below.
+    $head = [System.Text.Encoding]::ASCII.GetString($sb, 0, [Math]::Min(4096, $sb.Length))
+    if ($head -notmatch 'Rime' -and $head -notmatch 'SHA256') {
+        Write-Line 'Rejected: content does not look like the installer script.' 'Yellow'
+        $lastErr = [Exception]::new("unexpected content")
+        continue
+    }
+
+    $ok = $true
+    break
 }
 $ProgressPreference = 'Continue'
 
 if (-not $ok) {
     Write-Host ''
     Write-Host '  [X] All download mirrors failed; cannot fetch the installer.' -ForegroundColor Red
-    Write-Line "Last error: $($lastErr.Exception.Message)" 'Red'
+    if ($lastErr) { Write-Line "Last error: $($lastErr.Exception.Message)" 'Red' }
     Write-Host ''
     Write-Line 'You can download it manually and run it locally:' 'White'
     Write-Line "  https://github.com/zhihaofans/weasel-flypy-install-script/blob/master/$scriptName" 'DarkGray'
@@ -116,14 +138,7 @@ if (-not $ok) {
     exit 1
 }
 
-# Sanity check: a real script is text and larger than 1 KB
 $size = (Get-Item $tmp).Length
-if ($size -lt 1024) {
-    Write-Host "  [X] Downloaded content looks wrong ($size bytes); possibly blocked." -ForegroundColor Red
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    Read-Host 'Press Enter to exit'
-    exit 1
-}
 
 # ---------------------------------------------------------------------------
 # 2.1 Make sure the main script carries a UTF-8 BOM.
@@ -132,7 +147,7 @@ if ($size -lt 1024) {
 #   even break string boundaries and cause syntax errors. CDNs/proxies may drop
 #   the BOM, so re-add it here as a safety net.
 # ---------------------------------------------------------------------------
-$bytes = [System.IO.File]::ReadAllBytes($tmp)
+$bytes = $sb
 $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
 if (-not $hasBom) {
     # Only add the BOM if the content really is valid UTF-8, to avoid
@@ -157,6 +172,27 @@ if (-not $hasBom) {
 } else {
     Write-Line 'UTF-8 BOM present; encoding is fine.' 'DarkGray'
 }
+
+# Final check: with the BOM in place, PowerShell will read this file as UTF-8.
+# Decode it here the same way and confirm the Chinese strings resolve, so we
+# catch a corrupted download before handing it to the child process.
+# The Chinese markers are built from bytes on purpose - this file must stay
+# pure ASCII (see the note at the top), so no literal Chinese is allowed here.
+try {
+    $mk1 = [System.Text.Encoding]::UTF8.GetString([byte[]]@(0xE5,0xB0,0x8F,0xE7,0x8B,0xBC,0xE6,0xAF,0xAB)) # "xiao lang hao"
+    $mk2 = [System.Text.Encoding]::UTF8.GetString([byte[]]@(0xE9,0x9B,0xBE,0xE5,0x87,0x87,0xE6,0x8B,0xBC,0xE9,0x9F,0xB3)) # "wu song pin yin"
+    $finalBytes = [System.IO.File]::ReadAllBytes($tmp)
+    $finalText  = [System.Text.Encoding]::UTF8.GetString($finalBytes)
+    if ($finalBytes.Length -ge 3) { $finalText = $finalText.TrimStart([char]0xFEFF) }
+    if ($finalText.Contains($mk1) -or $finalText.Contains($mk2)) {
+        Write-Line 'Chinese text verified (main script will display correctly).' 'Green'
+    } else {
+        Write-Line 'Note: could not find expected Chinese markers; continuing anyway.' 'Yellow'
+    }
+} catch {
+    Write-Line "Note: content check skipped ($($_.Exception.Message))." 'DarkGray'
+}
+
 Write-Line "Downloaded $([math]::Round($size / 1024, 1)) KB" 'Green'
 
 # ---------------------------------------------------------------------------
