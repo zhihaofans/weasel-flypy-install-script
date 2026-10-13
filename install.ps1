@@ -72,13 +72,15 @@ if ([Environment]::OSVersion.Platform -ne 'Win32NT') {
 # ---------------------------------------------------------------------------
 $scriptName = if ($Source -eq 'cn') { 'install-rime-cn.ps1' } else { 'install-rime.ps1' }
 
-# raw.githubusercontent.com is the authoritative source and updates instantly.
-# jsDelivr is only a fallback: its @master cache can serve a STALE main script
-# for hours after a push, and a stale script may lack the UTF-8 BOM - which
-# would garble Chinese text under -File. So official first, CDN as backup.
+# Source order: jsDelivr first because it is far more stable from mainland CN
+# (1-3s) than raw.githubusercontent.com, which often takes 6-24s there and gets
+# reset mid-transfer ("the remote host closed an existing connection").
+# jsDelivr serves a cached copy of @master, so each download below is validated
+# for size/content before being accepted; a stale copy is rejected and the next
+# source is tried. ghproxy is the last resort.
 $baseUrls = @(
-    "https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName",
     "https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/$scriptName",
+    "https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName",
     "https://ghproxy.net/https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName"
 )
 
@@ -112,12 +114,21 @@ for ($i = 0; $i -lt $baseUrls.Count; $i++) {
         $lastErr = [Exception]::new("content too small")
         continue
     }
-    # A genuine main script is UTF-8 (may or may not carry a BOM here, we fix
-    # that below) and contains the ASCII markers below.
+    # A genuine main script contains the ASCII markers below.
     $head = [System.Text.Encoding]::ASCII.GetString($sb, 0, [Math]::Min(4096, $sb.Length))
     if ($head -notmatch 'Rime' -and $head -notmatch 'SHA256') {
         Write-Line 'Rejected: content does not look like the installer script.' 'Yellow'
         $lastErr = [Exception]::new("unexpected content")
+        continue
+    }
+    # Version guard: the current main scripts are saved as UTF-8 WITH a BOM, so
+    # a BOM is a reliable "this is the current revision" signal. An ancient copy
+    # (no BOM) would garble Chinese under -File, so reject it and try the next
+    # source - this is what makes jsDelivr-first safe despite its @master cache.
+    $bomOk = ($sb.Length -ge 3 -and $sb[0] -eq 0xEF -and $sb[1] -eq 0xBB -and $sb[2] -eq 0xBF)
+    if (-not $bomOk) {
+        Write-Line 'Rejected: stale copy without UTF-8 BOM (would garble Chinese).' 'Yellow'
+        $lastErr = [Exception]::new("stale copy (no BOM)")
         continue
     }
 
@@ -213,6 +224,10 @@ Write-Host ''
 
 # -Wait makes the launcher wait for the install to finish. The main script ends
 # with "Press Enter to exit", so this window will not flash and vanish.
+#
+# Note: we deliberately do NOT redirect the child's output to a file. Doing so
+# would hide everything from the console, and the main script's own progress
+# messages are exactly what the user needs to see live on failure.
 $p = Start-Process -FilePath $exe -ArgumentList $argList -Wait -PassThru
 
 # Clean up the temp script (the main script handles its own downloads itself)
@@ -220,6 +235,16 @@ Remove-Item $tmp -Force -ErrorAction SilentlyContinue
 
 if ($p.ExitCode -ne 0) {
     Write-Host "  [!] Installer process returned $($p.ExitCode); see output above." -ForegroundColor Yellow
+    Write-Host ''
+    Write-Line 'How to re-run with full output visible:' 'White'
+    Write-Host '   1. Right-click PowerShell -> "Run as administrator"' -ForegroundColor Gray
+    Write-Host '   2. Run the same one-line command again' -ForegroundColor Gray
+    Write-Host '   Running as admin skips the elevation step, so the real error shows.' -ForegroundColor Gray
+    Write-Host ''
+    Write-Line 'Alternative: run the main script directly so you can read the log:' 'White'
+    Write-Line "  irm https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName -OutFile `$env:TEMP\rime.ps1" 'DarkGray'
+    Write-Line '  powershell -ExecutionPolicy Bypass -File $env:TEMP\rime.ps1 -KeepDownload' 'DarkGray'
+    Write-Host ''
     Read-Host 'Press Enter to exit'
 } else {
     Write-Host '  [OK] Bootstrap done.' -ForegroundColor Green

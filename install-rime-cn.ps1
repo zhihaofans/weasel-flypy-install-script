@@ -124,9 +124,25 @@ function Invoke-Elevated {
     $exe = Join-Path $PSHOME 'powershell.exe'
     if (-not (Test-Path $exe)) { $exe = 'powershell.exe' }
     Write-Host '正在请求管理员权限...' -ForegroundColor Yellow
-    Start-Process -FilePath $exe -Verb RunAs -ArgumentList $Arguments -Wait
+    # 用 try/catch 兜住 UAC 被拒 / 被组策略阻止的情况：
+    # 否则 $ErrorActionPreference='Stop' 会让脚本静默终止，只留一个退出码，
+    # 用户完全不知道发生了什么。
+    try {
+        Start-Process -FilePath $exe -Verb RunAs -ArgumentList $Arguments -Wait -ErrorAction Stop
+        return $true
+    }
+    catch {
+        Write-Host ''
+        Write-Fail "提权失败：$($_.Exception.Message)"
+        Write-Info '常见原因：'
+        Write-Info '  - 在 UAC 弹窗里点了「否」'
+        Write-Info '  - 当前账户不是管理员，或没有提权权限'
+        Write-Info '  - 组策略禁止了 RunAs'
+        Write-Host ''
+        Write-Info '解决办法：右键 PowerShell -> 以管理员身份运行，再执行一次本命令。'
+        return $false
+    }
 }
-
 function Get-Sha256($path) {
     (Get-FileHash -Path $path -Algorithm SHA256).Hash.ToLower()
 }
@@ -199,7 +215,11 @@ if (-not $SkipInstall -and -not $isAdmin) {
     if ($RimeDir) { $argList += @('-RimeDir', "`"$RimeDir`"") }
     if ($PageSize) { $argList += @('-PageSize', "$PageSize") }
     if ($KeepDownload) { $argList += '-KeepDownload' }
-    Invoke-Elevated -Arguments $argList
+    if (-not (Invoke-Elevated -Arguments $argList)) {
+        # 提权失败已由 Invoke-Elevated 打印原因，这里显式退出码 1
+        Read-Host '按回车键退出'
+        exit 1
+    }
     exit 0
 }
 

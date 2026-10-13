@@ -7,20 +7,38 @@
 打开 PowerShell（**不用管理员**，脚本会自己提权），粘贴一行命令回车：
 
 ```powershell
-irm https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/install.ps1 | iex
+irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
 ```
 
-`raw.githubusercontent.com` 是 GitHub 官方源，**即时更新、无缓存**，推荐优先使用。
+**推荐用 `cdn.jsdelivr.net`**：实测它的响应稳定在 1-3 秒，而 `raw.githubusercontent.com` 在国内常见 6-24 秒的慢连接，很容易被中途掐断（报错 `远程主机强迫关闭了一个现有的连接`）。
 
-> **如果官方源连不上**（国内常见），改用 CDN 镜像：
+> 如果 CDN 连不上，改用 GitHub 官方源：
 >
 > ```powershell
-> irm https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1 | iex
+> irm https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/install.ps1 | iex
 > ```
 >
-> ⚠️ jsDelivr 对 `@master` 有缓存（可能滞后几小时）。如果刚更新过仓库，CDN 上可能还是旧版，遇到奇怪报错时优先换官方源。
+> ⚠️ **两个源各有取舍**：
+> - `cdn.jsdelivr.net`：连接稳定，但对 `@master` 有**缓存**（可能滞后几小时，刚更新仓库时可能拿到旧版）
+> - `raw.githubusercontent.com`：即时更新无缓存，但**国内连接容易被断**
+>
+> 遇到奇怪报错（如 `Unexpected attribute 'CmdletBinding'`）通常是拿到了 CDN 缓存的旧版，换另一个源即可。
 
 引导器会自动挑一个能通的源把主脚本下下来，然后启动安装。约 3-5 分钟。装完任务栏出现『小狼毫』图标，**默认就是小鹤双拼**。
+
+### 连不上？用「先存后跑」的方式
+
+如果上面的一行命令总是被网络掐断，改成两步，把文件先存下来再跑（`iwr` 的下载更抗断）：
+
+```powershell
+# 第 1 步：下载引导器（失败就换另一个源）
+curl.exe -L -o "$env:TEMP\rime-install.ps1" "https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/install.ps1"
+
+# 第 2 步：执行（-File 方式，断连不影响已下载的文件）
+powershell -ExecutionPolicy Bypass -File "$env:TEMP\rime-install.ps1"
+```
+
+> Windows 10 1803+ 自带 `curl.exe`，比 `irm` 对不稳定网络更宽容。
 
 > **引导器的提示是英文的**——这是刻意的：`irm | iex` 路径下 PowerShell 5.1 会按 GBK 解码响应，任何中文（哪怕在注释里）都会变成乱码，甚至会破坏脚本解析（报 `Unexpected attribute 'CmdletBinding'`）。真正的安装过程和结果都是完整中文（主脚本走 `-File` 路径，有 BOM 保护）。详见下文[编码铁律](#-编码铁律两个文件要求完全相反本项目最大的坑)。
 
