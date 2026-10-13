@@ -72,16 +72,19 @@ if ([Environment]::OSVersion.Platform -ne 'Win32NT') {
 # ---------------------------------------------------------------------------
 $scriptName = if ($Source -eq 'cn') { 'install-rime-cn.ps1' } else { 'install-rime.ps1' }
 
-# Source order: jsDelivr first because it is far more stable from mainland CN
-# (1-3s) than raw.githubusercontent.com, which often takes 6-24s there and gets
-# reset mid-transfer ("the remote host closed an existing connection").
-# jsDelivr serves a cached copy of @master, so each download below is validated
-# for size/content before being accepted; a stale copy is rejected and the next
-# source is tried. ghproxy is the last resort.
+# Source order: measured from mainland CN, raw.githubusercontent.com often times
+# out entirely (25s+) or gets reset mid-transfer ("the remote host closed an
+# existing connection"), so it is NOT tried first. The CDN and the two proxies
+# all answered in under 1s, so they come first and the official host is kept as
+# a last resort for users outside CN.
+# jsDelivr serves a cached copy of @master, so every download below is validated
+# (size, markers, BOM) before being accepted; a stale copy is rejected and the
+# next source is tried.
 $baseUrls = @(
     "https://cdn.jsdelivr.net/gh/zhihaofans/weasel-flypy-install-script@master/$scriptName",
-    "https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName",
-    "https://ghproxy.net/https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName"
+    "https://gh-proxy.com/https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName",
+    "https://ghproxy.net/https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName",
+    "https://raw.githubusercontent.com/zhihaofans/weasel-flypy-install-script/master/$scriptName"
 )
 
 # ---------------------------------------------------------------------------

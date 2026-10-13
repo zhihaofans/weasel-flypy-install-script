@@ -259,14 +259,78 @@ if (-not $SkipInstall) {
     Write-Ok 'SHA256 校验通过。'
 
     # NSIS 静默安装（/S）。不传 /D，装到系统默认位置，保证输入法正常注册。
+    #
+    # 【为什么加超时】安装器 /S 完成后会再调 WeaselSetup.exe 注册输入法，
+    # 而后者在拿不到管理员权限时会 ShellExecuteEx(RunAs) 并无限等待，
+    # 表现为「静默安装中」永远不结束。加超时兜底，避免用户干等。
     Write-Info '静默安装中（可能需要 1-2 分钟，请勿关闭窗口）...'
-    $p = Start-Process -FilePath $exe -ArgumentList '/S' -Wait -PassThru
-    if ($p.ExitCode -ne 0) {
-        Write-Warn2 "安装器返回码 $($p.ExitCode)，继续尝试部署方案。"
-    } else {
-        Write-Ok '小狼毫安装完成。'
+    $InstallTimeoutSec = 300
+    $proc = Start-Process -FilePath $exe -ArgumentList '/S' -PassThru
+    $finished = $proc.WaitForExit($InstallTimeoutSec * 1000)
+    if (-not $finished) {
+        # 超时：很可能安装器内部在等 WeaselSetup 的 UAC 提权（后台弹窗，前台看不见）。
+        # 不直接 kill —— 先看看它是否已经装出了文件，装了就继续往下走。
+        Write-Warn2 "静默安装超过 $InstallTimeoutSec 秒仍未退出。"
+        $peek = $null
+        foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+            if (-not $base) { continue }
+            $rimeRoot = Join-Path $base 'Rime'
+            if (Test-Path $rimeRoot) { $peek = $rimeRoot; break }
+        }
+        if ($peek) {
+            Write-Ok "检测到已安装目录: $peek（安装器可能只是收尾卡住，继续后续步骤）"
+        } else {
+            Write-Fail '安装器卡住且未生成安装目录，判定安装失败。'
+            Write-Host ''
+            Write-Info '解决办法（任选其一）：'
+            Write-Info '  A) 右键 PowerShell -> 以管理员身份运行，重新执行本命令'
+            Write-Info "  B) 手动双击运行安装器完成安装：$exe"
+            Write-Info '     装完后重新执行本命令并加 -SkipInstall 即可只装方案'
+            Write-Host ''
+            Read-Host '按回车键退出'
+            exit 1
+        }
+        try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+    }
+    elseif ($proc.ExitCode -ne 0) {
+        Write-Warn2 "安装器返回码 $($proc.ExitCode)，继续尝试部署方案。"
+    }
+    else {
+        Write-Ok '小狼毫安装程序已退出。'
     }
     Start-Sleep -Seconds 2
+
+    # 1.2 确认安装结果并补做注册
+    #   /S 只负责解压；输入法注册由 WeaselSetup.exe 完成。这里显式调用一次，
+    #   即便安装器已经注册过也是幂等的（走 install 流程，重复执行安全）。
+    $setup = $null
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $base) { continue }
+        $rimeRoot = Join-Path $base 'Rime'
+        if (-not (Test-Path $rimeRoot)) { continue }
+        $setup = Get-ChildItem -Path $rimeRoot -Filter 'WeaselSetup.exe' -Recurse `
+                -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($setup) { break }
+    }
+    if ($setup) {
+        Write-Info "注册输入法: $($setup.FullName) /s"
+        try {
+            # /s = 静默安装（简体中文），来自 WeaselSetup 官方参数表。
+            # 必须是管理员权限；本脚本此时已在管理员上下文中运行。
+            $sp = Start-Process -FilePath $setup.FullName -ArgumentList '/s' -Wait -PassThru
+            if ($sp.ExitCode -eq 0) {
+                Write-Ok '输入法注册完成。'
+            } else {
+                Write-Warn2 "WeaselSetup 返回码 $($sp.ExitCode)，输入法可能未注册。"
+            }
+        } catch {
+            Write-Warn2 "注册输入法时出错：$($_.Exception.Message)"
+        }
+    } else {
+        Write-Warn2 '未找到 WeaselSetup.exe，跳过注册。'
+        Write-Info '若输入法未出现在系统里，可运行 %ProgramFiles%\Rime\weasel-*\WeaselSetup.exe /s'
+    }
+    Start-Sleep -Seconds 1
 }
 else {
     Write-Step '第 1 步 / 3：跳过小狼毫安装（-SkipInstall）'
